@@ -11,8 +11,10 @@ use crate::{
     util::output::{done_processing, processing},
 };
 
+use serde::{Deserialize, Serialize};
+
 /// Represents a single row in the `handle` table.
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Handle {
     pub rowid: i32,
     pub id: String,

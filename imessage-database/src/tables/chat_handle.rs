@@ -13,7 +13,10 @@ use crate::{
 };
 use rusqlite::{Connection, Error, Result, Row, Statement};
 
+use serde::{Deserialize, Serialize};
+
 /// Represents a single row in the `chat_handle_join` table.
+#[derive(Serialize, Deserialize)]
 pub struct ChatToHandle {
     chat_id: i32,
     handle_id: i32,

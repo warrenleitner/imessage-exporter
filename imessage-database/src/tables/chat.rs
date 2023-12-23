@@ -11,8 +11,10 @@ use crate::{
     tables::table::{Cacheable, Table, CHAT},
 };
 
+use serde::{Deserialize, Serialize};
+
 /// Represents a single row in the `chat` table.
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Chat {
     pub rowid: i32,
     pub chat_identifier: String,

@@ -36,13 +36,6 @@ if [ -n "$VERSION" ]; then
     tar -czf ../../../output/imessage-exporter-aarch64-apple-darwin.tar.gz imessage-exporter
     cd ../../..
 
-    # Build for 64-bit Intel macOS
-    cargo build --target x86_64-apple-darwin --release
-    cp target/x86_64-apple-darwin/release/imessage-exporter output/imessage-exporter-x86_64-apple-darwin
-    cd target/x86_64-apple-darwin/release/
-    tar -czf ../../../output/imessage-exporter-x86_64-apple-darwin.tar.gz imessage-exporter
-    cd ../../..
-
     # Put the version number back
     sed -i '' "s/version = \"$VERSION\"/version = \"0.0.0\"/g" imessage-database/Cargo.toml
     sed -i '' "s/version = \"$VERSION\"/version = \"0.0.0\"/g" imessage-exporter/Cargo.toml

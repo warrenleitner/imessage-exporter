@@ -25,6 +25,8 @@ use crate::{
     },
 };
 
+use serde::{Deserialize, Serialize};
+
 /// The default root directory for iMessage attachment data
 pub const DEFAULT_ATTACHMENT_ROOT: &str = "~/Library/Messages/Attachments";
 
@@ -43,7 +45,7 @@ pub enum MediaType<'a> {
 }
 
 /// Represents a single row in the `attachment` table.
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Attachment {
     pub rowid: i32,
     pub filename: Option<String>,
@@ -54,6 +56,7 @@ pub struct Attachment {
     pub is_sticker: bool,
     pub hide_attachment: i32,
     pub copied_path: Option<PathBuf>,
+    pub message_id: i32
 }
 
 impl Table for Attachment {
@@ -67,6 +70,7 @@ impl Table for Attachment {
             total_bytes: row.get("total_bytes").unwrap_or_default(),
             is_sticker: row.get("is_sticker").unwrap_or(false),
             hide_attachment: row.get("hide_attachment").unwrap_or(0),
+            message_id: row.get("message_id").unwrap_or_default(),
             copied_path: None,
         })
     }
