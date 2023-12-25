@@ -41,7 +41,7 @@ fn iter_messages() -> Result<(), TableError> {
 
         let mut msg_attcs = Attachment::from_message(&db, &msg);
         if msg_attcs.is_ok() {
-            for mutattc in msg_attcs.unwrap() {
+            for mut attc in msg_attcs.unwrap() {
                 attc.message_id = msg.rowid;
                 attachments_vec.push(attc);
             }
