@@ -10,6 +10,38 @@ import pandas
 import emoji
 
 
+stat_headers = {
+    'name': 'Person',
+    'count': 'Total Messages',
+    'chars': 'Total Characters',
+    'words': 'Total Words',
+    'avg_chars': 'Avg Chars Per Msg',
+    'avg_words': 'Avg Words Per Msg',
+    'avg_word_len': 'Avg Chars Per Word',
+    'emoji': 'Total Emoji Count',
+    'reactions': 'Total Reaction Count'
+}
+
+day_headers = {
+    'name': 'Person',
+    0: 'Monday',
+    1: 'Tuesday',
+    2: 'Wendesday',
+    3: 'Thursday',
+    4: 'Friday',
+    5: 'Saturday',
+    6: 'Sunday',
+}
+
+reaction_headers = {
+    'name' : 'Person',
+    'Liked': '👍',
+    'Disliked': '👎',
+    'Loved': '❤️',
+    'Questioned': '❓',
+    'Emphasized': '❗️'
+}
+
 # Define the MacOS epoch
 unix_epoch = datetime.datetime(2001, 1, 1, 0, 0, 0, tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo("America/Los_Angeles"))
 
@@ -60,21 +92,27 @@ TOTAL_IDX=2
 MY_INDICIES=[IRELYN_IDX, WARREN_IDX, TOTAL_IDX]
 MY_NAMES=['Irelyn', 'Warren', 'TOTAL']
 
-template_dict = {'name': "", 'count': 0, 'chars': 0, 'words': 0, 'emoji': 0}
+template_dict = {'name': "", 'count': 0, 'chars': 0, 'words': 0, 'emoji': 0, 'reactions': 0}
 stats = [dict(template_dict), dict(template_dict), dict(template_dict)]
 
 time_of_day_counters = [dict(), dict(), dict()]
 day_of_week_counters = [dict(), dict(), dict()]
 date_counters = [dict(), dict(), dict()]
 emoji_counters = [dict(), dict(), dict()]
+reaction_counters = [dict(), dict(), dict()]
 
-for i,d in itertools.product(MY_INDICIES, [stats, time_of_day_counters, day_of_week_counters, date_counters, emoji_counters]):
+REACTION_TYPES = ['Liked', 'Disliked', 'Loved', 'Questioned', 'Emphasized']
+
+for i,d in itertools.product(MY_INDICIES, [stats, time_of_day_counters, day_of_week_counters, date_counters, emoji_counters, reaction_counters]):
     d[i]['name'] = MY_NAMES[i]
 
 for i,cnt in itertools.product(range(0, 24), time_of_day_counters):
     cnt[i] = 0
 
 for i,cnt in itertools.product(range(0, 7), day_of_week_counters):
+    cnt[i] = 0
+
+for i,cnt in itertools.product(REACTION_TYPES, reaction_counters):
     cnt[i] = 0
 
 for msg in filtered_messages:
@@ -88,12 +126,18 @@ for msg in filtered_messages:
 
     stats[idx]['count'] = stats[idx]['count'] + 1
     if msg['text']:
-        stats[idx]['chars'] = stats[idx]['chars'] + len(msg['text'])
-        stats[idx]['words'] = stats[idx]['words'] + len(re.findall(r"\w+", msg['text']))
-        for emj in ''.join(c for c in msg['text'] if c in emoji.EMOJI_DATA):
-            stats[idx]['emoji'] = stats[idx]['emoji'] + 1
-            emoji_counters[idx][emj] = emoji_counters[idx].get(emj, 0) + 1
-    
+        for pattern in REACTION_TYPES:
+            if msg['text'].startswith(pattern):
+                stats[idx]['reactions'] += 1
+                reaction_counters[idx][pattern] += 1
+                break
+        else:
+            stats[idx]['chars'] += len(msg['text'])
+            stats[idx]['words'] += len(re.findall(r"\w+", msg['text']))
+            for emj in ''.join(c for c in msg['text'] if c in emoji.EMOJI_DATA):
+                stats[idx]['emoji'] += 1
+                emoji_counters[idx][emj] = emoji_counters[idx].get(emj, 0) + 1
+
     # Add the seconds to the Unix epoch
     msg_time = unix_epoch + datetime.timedelta(seconds=msg['date'] / 10**9)
     time_of_day_counters[idx][msg_time.hour] = time_of_day_counters[idx][msg_time.hour] + 1
@@ -101,7 +145,7 @@ for msg in filtered_messages:
     str_date = str((msg_time - datetime.timedelta(days=msg_time.weekday())).date())
     date_counters[idx][str_date] = date_counters[idx].get(str_date, 0) + 1
 
-for key in ['count', 'chars', 'words', 'emoji']:
+for key in ['count', 'chars', 'words', 'emoji', 'reactions']:
     stats[TOTAL_IDX][key] = sum(d.get(key, 0) for d in stats[:TOTAL_IDX])
 
 for stat in stats:
@@ -127,28 +171,8 @@ for i in list(set.union(*(set(d.keys()) for d in emoji_counters[:TOTAL_IDX])).di
         for j in MY_INDICIES:
             emoji_counters[j]['other'] = emoji_counters[j].get('other', 0) + emoji_counters[j].pop(i)
 
-
-stat_headers = {
-    'name': 'Person',
-    'count': 'Total Messages',
-    'chars': 'Total Characters',
-    'words': 'Total Words',
-    'avg_chars': 'Avg Chars Per Msg',
-    'avg_words': 'Avg Words Per Msg',
-    'avg_word_len': 'Avg Chars Per Word',
-    'emoji': 'Total Emoji Count' 
-}
-
-day_headers = {
-    'name': 'Person',
-    0: 'Monday',
-    1: 'Tuesday',
-    2: 'Wendesday',
-    3: 'Thursday',
-    4: 'Friday',
-    5: 'Saturday',
-    6: 'Sunday',
-}
+for i in REACTION_TYPES:
+    reaction_counters[TOTAL_IDX][i] = sum(d.get(i, 0) for d in reaction_counters[:TOTAL_IDX]) 
 
 BIBLE_WORDS = 783137
 FACEBOOK_WORDS = 23000
@@ -189,13 +213,17 @@ print(date_counters_df.transpose().to_csv())
 print("")
 print(tabulate(emoji_counters[:TOTAL_IDX] + [{"name": SEPARATING_LINE}, emoji_counters[-1]], headers="keys", intfmt=",", floatfmt=".2f", tablefmt="simple"))
 
+print("")
+print(tabulate(reaction_counters[:TOTAL_IDX] + [{"name": SEPARATING_LINE}, reaction_counters[-1]], headers=reaction_headers, intfmt=",", floatfmt=".2f", tablefmt="simple"))
+
+
 # First message count
 # Last message count
 # Average response time
 # Total attachments
 # Types of attachments
 # Average individual message reply time
-# Reaction Stats
+# DONE Reaction Stats
 # DONE Peak time of day (graph)
 # DONE Peak day of week (graph)
 # DONE Date graph
