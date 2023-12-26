@@ -8,7 +8,13 @@ from zoneinfo import ZoneInfo
 import itertools
 import pandas
 import emoji
-
+from os import path
+from PIL import Image
+import numpy as np
+import matplotlib
+import matplotlib.pyplot as plt
+import os
+from wordcloud import WordCloud, STOPWORDS
 
 stat_headers = {
     'name': 'Person',
@@ -37,6 +43,7 @@ reaction_headers = {
     'name' : 'Person',
     'Liked': '👍',
     'Disliked': '👎',
+    'Laughed': '😆',
     'Loved': '❤️',
     'Questioned': '❓',
     'Emphasized': '❗️'
@@ -45,7 +52,7 @@ reaction_headers = {
 # Define the MacOS epoch
 unix_epoch = datetime.datetime(2001, 1, 1, 0, 0, 0, tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo("America/Los_Angeles"))
 
-# subprocess.run(["cargo", "run", "--release", "--bin", "imessage-stats"])
+subprocess.run(["cargo", "run", "--release", "--bin", "imessage-stats"])
 
 
 # Open the json file and read its contents
@@ -101,7 +108,9 @@ date_counters = [dict(), dict(), dict()]
 emoji_counters = [dict(), dict(), dict()]
 reaction_counters = [dict(), dict(), dict()]
 
-REACTION_TYPES = ['Liked', 'Disliked', 'Loved', 'Questioned', 'Emphasized']
+wordcloud_text = ["", "", ""]
+
+REACTION_TYPES = ['Liked', 'Disliked', 'Loved', 'Laughed', 'Questioned', 'Emphasized']
 
 for i,d in itertools.product(MY_INDICIES, [stats, time_of_day_counters, day_of_week_counters, date_counters, emoji_counters, reaction_counters]):
     d[i]['name'] = MY_NAMES[i]
@@ -132,6 +141,7 @@ for msg in filtered_messages:
                 reaction_counters[idx][pattern] += 1
                 break
         else:
+            wordcloud_text[idx] += " " + msg['text'].replace("’", "").lower()
             stats[idx]['chars'] += len(msg['text'])
             stats[idx]['words'] += len(re.findall(r"\w+", msg['text']))
             for emj in ''.join(c for c in msg['text'] if c in emoji.EMOJI_DATA):
@@ -147,6 +157,8 @@ for msg in filtered_messages:
 
 for key in ['count', 'chars', 'words', 'emoji', 'reactions']:
     stats[TOTAL_IDX][key] = sum(d.get(key, 0) for d in stats[:TOTAL_IDX])
+
+wordcloud_text[TOTAL_IDX] = wordcloud_text[WARREN_IDX] + " " + wordcloud_text[IRELYN_IDX]
 
 for stat in stats:
     stat['avg_chars'] = int(stat['chars'] / stat['count'])
@@ -217,6 +229,18 @@ print("")
 print(tabulate(reaction_counters[:TOTAL_IDX] + [{"name": SEPARATING_LINE}, reaction_counters[-1]], headers=reaction_headers, intfmt=",", floatfmt=".2f", tablefmt="simple"))
 
 
+# read the mask image
+# taken from
+# http://www.stencilry.org/stencils/movies/alice%20in%20wonderland/255fk.jpg
+llama_mask = np.array(Image.open("llama.jpg"))
+
+stopwords = set(STOPWORDS)
+
+cloud_colors = [ 'cool', 'autumn', 'plasma']
+for i in MY_INDICIES:
+    WordCloud(background_color="white", max_words=2000, mask=llama_mask,
+               stopwords=stopwords, contour_width=0, colormap=cloud_colors[i], min_word_length=3).generate(wordcloud_text[i]).to_file(f'cloud_{MY_NAMES[i].lower()}.png')
+
 # First message count
 # Last message count
 # Average response time
@@ -229,11 +253,12 @@ print(tabulate(reaction_counters[:TOTAL_IDX] + [{"name": SEPARATING_LINE}, react
 # DONE Date graph
 # DONE Emoji usage
 # DONE Most used emojis
-# Word cloud
+# DONE Word cloud
 # Stats pre and post break
-
+# Documentation
 
 # Parse and splice facebook messages
-
-
 # Aggregate stats over time????
+# App
+# Parameterize stuff
+# Refactor into functions

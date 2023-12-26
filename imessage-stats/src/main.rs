@@ -18,10 +18,10 @@ use imessage_database::{
 use serde_json::json;
 
 fn iter_messages() -> Result<(), TableError> {
-    /// Create a read-only connection to an iMessage database
+    // Create a read-only connection to an iMessage database
     let db = get_connection(&default_db_path()).unwrap();
 
-    /// Create SQL statement
+    // Create SQL statement
     let mut statement = Message::get(&db)?;
 
     // Execute statement
@@ -29,17 +29,17 @@ fn iter_messages() -> Result<(), TableError> {
         .query_map([], |row| Ok(Message::from_row(row)))
         .unwrap();
 
-    /// Iterate over each row
+    // Iterate over each row
     println!("vvvvvvvvvv MESSAGES START HERE vvvvvvvvvv");
     let mut messages_vec = Vec::new();
     let mut attachments_vec = Vec::new();
     for message in messages {
         let mut msg = Message::extract(message)?;
 
-        /// Parse message body if it was sent from macOS 13.0 or newer
-        msg.gen_text(&db);
+        // Parse message body if it was sent from macOS 13.0 or newer
+        let _res  = msg.gen_text(&db);
 
-        let mut msg_attcs = Attachment::from_message(&db, &msg);
+        let msg_attcs = Attachment::from_message(&db, &msg);
         if msg_attcs.is_ok() {
             for mut attc in msg_attcs.unwrap() {
                 attc.message_id = msg.rowid;
@@ -48,9 +48,9 @@ fn iter_messages() -> Result<(), TableError> {
         }
         messages_vec.push(json!(msg));
     }
-    std::fs::write("messages.json", serde_json::to_string_pretty(&messages_vec).unwrap());
+    let _res = std::fs::write("messages.json", serde_json::to_string_pretty(&messages_vec).unwrap());
     drop(messages_vec);
-    std::fs::write("attachments.json", serde_json::to_string_pretty(&attachments_vec).unwrap());
+    let _res = std::fs::write("attachments.json", serde_json::to_string_pretty(&attachments_vec).unwrap());
     drop(attachments_vec);
     println!("^^^^^^^^^  MESSAGES END HERE  ^^^^^^^^^");
 
@@ -59,15 +59,15 @@ fn iter_messages() -> Result<(), TableError> {
         .query_map([], |row| Ok(Chat::from_row(row)))
         .unwrap();
 
-    /// Iterate over each row
+    // Iterate over each row
     println!("vvvvvvvvvv CHATS START HERE vvvvvvvvvv");
     let mut chats_vec = Vec::new();
     for chat in chats {
-        let mut cht = Chat::extract(chat)?;
+        let cht = Chat::extract(chat)?;
 
         chats_vec.push(json!(cht));
     }
-    std::fs::write("chats.json", serde_json::to_string_pretty(&chats_vec).unwrap());
+    let _res = std::fs::write("chats.json", serde_json::to_string_pretty(&chats_vec).unwrap());
     drop(chats_vec);
     println!("^^^^^^^^^  CHATS END HERE  ^^^^^^^^^");
 
@@ -78,13 +78,13 @@ fn iter_messages() -> Result<(), TableError> {
         .query_map([], |row| Ok(Handle::from_row(row)))
         .unwrap();
 
-    /// Iterate over each row
+    // Iterate over each row
     for handle in handles {
-        let mut hndl = Handle::extract(handle)?;
+        let hndl = Handle::extract(handle)?;
 
         handles_vec.push(json!(hndl));
     }
-    std::fs::write("handles.json", serde_json::to_string_pretty(&handles_vec).unwrap());
+    let _res = std::fs::write("handles.json", serde_json::to_string_pretty(&handles_vec).unwrap());
     drop(handles_vec);
     println!("^^^^^^^^^  HANDLES END HERE  ^^^^^^^^^");
 
@@ -96,13 +96,13 @@ fn iter_messages() -> Result<(), TableError> {
         .query_map([], |row| Ok(ChatToHandle::from_row(row)))
         .unwrap();
 
-    /// Iterate over each row
+    // Iterate over each row
     for chathandle in chattohandles {
-        let mut c2h = ChatToHandle::extract(chathandle)?;
+        let c2h = ChatToHandle::extract(chathandle)?;
 
         chat2handle_vec.push(json!(c2h));
     }
-    std::fs::write("chat2handles.json", serde_json::to_string_pretty(&chat2handle_vec).unwrap());
+    let _res = std::fs::write("chat2handles.json", serde_json::to_string_pretty(&chat2handle_vec).unwrap());
     drop(chat2handle_vec);
     println!("^^^^^^^^^  CHATTOHANDLES END HERE  ^^^^^^^^^");
 
@@ -111,7 +111,7 @@ fn iter_messages() -> Result<(), TableError> {
 
 fn main() {
     let ret = iter_messages();
-    if(ret.is_err()) {
+    if ret.is_err() {
         println!("{}", ret.unwrap_err());
     }
 }
