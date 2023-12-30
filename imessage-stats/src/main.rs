@@ -29,8 +29,10 @@ fn iter_messages() -> Result<(), TableError> {
         .query_map([], |row| Ok(Message::from_row(row)))
         .unwrap();
 
+    println!("Exporting iMessage data as JSON");
+
     // Iterate over each row
-    println!("vvvvvvvvvv MESSAGES START HERE vvvvvvvvvv");
+    // println!("vvvvvvvvvv MESSAGES START HERE vvvvvvvvvv");
     let mut messages_vec = Vec::new();
     let mut attachments_vec = Vec::new();
     for message in messages {
@@ -52,7 +54,7 @@ fn iter_messages() -> Result<(), TableError> {
     drop(messages_vec);
     let _res = std::fs::write("attachments.json", serde_json::to_string_pretty(&attachments_vec).unwrap());
     drop(attachments_vec);
-    println!("^^^^^^^^^  MESSAGES END HERE  ^^^^^^^^^");
+    // println!("^^^^^^^^^  MESSAGES END HERE  ^^^^^^^^^");
 
     let mut statement = Chat::get(&db)?;
     let chats = statement
@@ -60,7 +62,7 @@ fn iter_messages() -> Result<(), TableError> {
         .unwrap();
 
     // Iterate over each row
-    println!("vvvvvvvvvv CHATS START HERE vvvvvvvvvv");
+    // println!("vvvvvvvvvv CHATS START HERE vvvvvvvvvv");
     let mut chats_vec = Vec::new();
     for chat in chats {
         let cht = Chat::extract(chat)?;
@@ -69,9 +71,9 @@ fn iter_messages() -> Result<(), TableError> {
     }
     let _res = std::fs::write("chats.json", serde_json::to_string_pretty(&chats_vec).unwrap());
     drop(chats_vec);
-    println!("^^^^^^^^^  CHATS END HERE  ^^^^^^^^^");
+    // println!("^^^^^^^^^  CHATS END HERE  ^^^^^^^^^");
 
-    println!("vvvvvvvvvv HANDLES START HERE vvvvvvvvvv");
+    // println!("vvvvvvvvvv HANDLES START HERE vvvvvvvvvv");
     let mut handles_vec = Vec::new();
     let mut statement = Handle::get(&db)?;
     let handles = statement
@@ -86,10 +88,10 @@ fn iter_messages() -> Result<(), TableError> {
     }
     let _res = std::fs::write("handles.json", serde_json::to_string_pretty(&handles_vec).unwrap());
     drop(handles_vec);
-    println!("^^^^^^^^^  HANDLES END HERE  ^^^^^^^^^");
+    // println!("^^^^^^^^^  HANDLES END HERE  ^^^^^^^^^");
 
     // Does not define a debug format
-    println!("vvvvvvvvvv CHATTOHANDLES START HERE vvvvvvvvvv");
+    // println!("vvvvvvvvvv CHATTOHANDLES START HERE vvvvvvvvvv");
     let mut chat2handle_vec = Vec::new();
     let mut statement = ChatToHandle::get(&db)?;
     let chattohandles = statement
@@ -104,7 +106,7 @@ fn iter_messages() -> Result<(), TableError> {
     }
     let _res = std::fs::write("chat2handles.json", serde_json::to_string_pretty(&chat2handle_vec).unwrap());
     drop(chat2handle_vec);
-    println!("^^^^^^^^^  CHATTOHANDLES END HERE  ^^^^^^^^^");
+    // println!("^^^^^^^^^  CHATTOHANDLES END HERE  ^^^^^^^^^");
 
     Ok(())
 }

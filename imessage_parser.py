@@ -1,4 +1,6 @@
-# Import the json module
+
+
+########## IMPORTS ##########
 import json
 import re
 from tabulate import tabulate, SEPARATING_LINE
@@ -8,14 +10,12 @@ from zoneinfo import ZoneInfo
 import itertools
 import pandas
 import emoji
-from os import path
 from PIL import Image
 import numpy as np
-import matplotlib
-import matplotlib.pyplot as plt
-import os
-from wordcloud import WordCloud, STOPWORDS
+from wordcloud import WordCloud
+import argparse
 
+########## DEFINES ##########
 stat_headers = {
     'name': 'Person',
     'count': 'Total Messages',
@@ -49,197 +49,192 @@ reaction_headers = {
     'Emphasized': '❗️'
 }
 
-# Define the MacOS epoch
-unix_epoch = datetime.datetime(2001, 1, 1, 0, 0, 0, tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo("America/Los_Angeles"))
+def load_json_data(filename):
+    with open(filename, "r") as f:
+        data = f.read()
+    return json.loads(data)
 
-subprocess.run(["cargo", "run", "--release", "--bin", "imessage-stats"])
+def load_messages(phone_number):
+    attachments = load_json_data("attachments.json")
+    chat2handles = load_json_data("chat2handles.json")
+    chats = load_json_data("chats.json")
+    handles = load_json_data("handles.json")
+    messages = load_json_data("messages.json")
 
+    handle_ids = [h['rowid'] for h in handles if h['id'].find(phone_number) != -1]
+    # print('Handles: ' + str(handle_ids))
 
-# Open the json file and read its contents
-with open("attachments.json", "r") as f:
-    data = f.read()
-attachments = json.loads(data)
+    chat_ids = [h['chat_id'] for h in chat2handles if h['handle_id'] in handle_ids]
+    # print('Chats: ' + str(chat_ids))
 
-with open("chat2handles.json", "r") as f:
-    data = f.read()
-chat2handles = json.loads(data)
+    return handle_ids, sorted([m for m in messages if m['chat_id'] in chat_ids], key=lambda d: d['date'])
 
-with open("chats.json", "r") as f:
-    data = f.read()
-chats = json.loads(data)
+def export_to_csv(data, filename, headers = None):
+    df = pandas.DataFrame(data)
+    # df = df.rename(columns=df.iloc[-1]).drop(df.index[-1])
+    if headers:
+        df = df.rename(columns=headers)
 
-with open("handles.json", "r") as f:
-    data = f.read()
-handles = json.loads(data)
+    df.to_csv(filename, index=False)
 
-with open("messages.json", "r") as f:
-    data = f.read()
-messages = json.loads(data)
+def main():
+    parser = argparse.ArgumentParser(description='Process iMessage data.')
+    parser.add_argument('-u', '--update-data', action='store_true', help='Re-run the iMessage data export')
+    parser.add_argument('-p', '--phone-number', type=str, help='Phone number to analyze', required=True)
+    args = parser.parse_args()
 
-irelyns_phone = "17028811404"
-handle_ids = [h['rowid'] for h in handles if h['id'].find(irelyns_phone) != -1]
-print('Handles: ' + str(handle_ids))
+    print("Compiling and running imessage-exporter...")
+    if args.update_data:
+        subprocess.run(["cargo", "run", "--release", "--bin", "imessage-stats"])
 
-chat_ids = [h['chat_id'] for h in chat2handles if h['handle_id'] in handle_ids]
-print('Chats: ' + str(chat_ids))
+    # Define the MacOS epoch
+    unix_epoch = datetime.datetime(2001, 1, 1, 0, 0, 0, tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo("America/Los_Angeles"))
+    
+    print(f'Loading messages for phone number {args.phone_number}...')
+    handle_ids, filtered_messages = load_messages(args.phone_number)
+    # print(len(filtered_messages))
 
-filtered_messages = sorted([m for m in messages if m['chat_id'] in chat_ids], key=lambda d: d['date'])
-print(len(filtered_messages))
-
-# Define the Unix epoch
-unix_epoch = datetime.datetime(2001, 1, 1, 0, 0, 0, tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo("America/Los_Angeles"))
-
-# Add the seconds to the Unix epoch
-first_msg_time = unix_epoch + datetime.timedelta(seconds=filtered_messages[0]['date'] / 10**9)
-last_msg_time = unix_epoch + datetime.timedelta(seconds=filtered_messages[-1]['date'] / 10**9)
-
-IRELYN_IDX=0
-WARREN_IDX=1
-TOTAL_IDX=2
-MY_INDICIES=[IRELYN_IDX, WARREN_IDX, TOTAL_IDX]
-MY_NAMES=['Irelyn', 'Warren', 'TOTAL']
-
-template_dict = {'name': "", 'count': 0, 'chars': 0, 'words': 0, 'emoji': 0, 'reactions': 0}
-stats = [dict(template_dict), dict(template_dict), dict(template_dict)]
-
-time_of_day_counters = [dict(), dict(), dict()]
-day_of_week_counters = [dict(), dict(), dict()]
-date_counters = [dict(), dict(), dict()]
-emoji_counters = [dict(), dict(), dict()]
-reaction_counters = [dict(), dict(), dict()]
-
-wordcloud_text = ["", "", ""]
-
-REACTION_TYPES = ['Liked', 'Disliked', 'Loved', 'Laughed', 'Questioned', 'Emphasized']
-
-for i,d in itertools.product(MY_INDICIES, [stats, time_of_day_counters, day_of_week_counters, date_counters, emoji_counters, reaction_counters]):
-    d[i]['name'] = MY_NAMES[i]
-
-for i,cnt in itertools.product(range(0, 24), time_of_day_counters):
-    cnt[i] = 0
-
-for i,cnt in itertools.product(range(0, 7), day_of_week_counters):
-    cnt[i] = 0
-
-for i,cnt in itertools.product(REACTION_TYPES, reaction_counters):
-    cnt[i] = 0
-
-for msg in filtered_messages:
-    if msg['is_from_me']:
-        idx = WARREN_IDX
-    elif msg['handle_id'] in handle_ids:
-        idx = IRELYN_IDX
-    else:
-        print("Unknown ID: " + str(msg['handle_id']))
-        continue
-
-    stats[idx]['count'] = stats[idx]['count'] + 1
-    if msg['text']:
-        for pattern in REACTION_TYPES:
-            if msg['text'].startswith(pattern):
-                stats[idx]['reactions'] += 1
-                reaction_counters[idx][pattern] += 1
-                break
-        else:
-            wordcloud_text[idx] += " " + msg['text'].replace("’", "").lower()
-            stats[idx]['chars'] += len(msg['text'])
-            stats[idx]['words'] += len(re.findall(r"\w+", msg['text']))
-            for emj in ''.join(c for c in msg['text'] if c in emoji.EMOJI_DATA):
-                stats[idx]['emoji'] += 1
-                emoji_counters[idx][emj] = emoji_counters[idx].get(emj, 0) + 1
+    # Define the Unix epoch
+    unix_epoch = datetime.datetime(2001, 1, 1, 0, 0, 0, tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo("America/Los_Angeles"))
 
     # Add the seconds to the Unix epoch
-    msg_time = unix_epoch + datetime.timedelta(seconds=msg['date'] / 10**9)
-    time_of_day_counters[idx][msg_time.hour] = time_of_day_counters[idx][msg_time.hour] + 1
-    day_of_week_counters[idx][msg_time.weekday()] = day_of_week_counters[idx][msg_time.weekday()] + 1
-    str_date = str((msg_time - datetime.timedelta(days=msg_time.weekday())).date())
-    date_counters[idx][str_date] = date_counters[idx].get(str_date, 0) + 1
+    first_msg_time = unix_epoch + datetime.timedelta(seconds=filtered_messages[0]['date'] / 10**9)
+    last_msg_time = unix_epoch + datetime.timedelta(seconds=filtered_messages[-1]['date'] / 10**9)
 
-for key in ['count', 'chars', 'words', 'emoji', 'reactions']:
-    stats[TOTAL_IDX][key] = sum(d.get(key, 0) for d in stats[:TOTAL_IDX])
+    IRELYN_IDX=0
+    WARREN_IDX=1
+    TOTAL_IDX=2
+    MY_INDICIES=[IRELYN_IDX, WARREN_IDX, TOTAL_IDX]
+    MY_NAMES=['Irelyn', 'Warren', 'TOTAL']
 
-wordcloud_text[TOTAL_IDX] = wordcloud_text[WARREN_IDX] + " " + wordcloud_text[IRELYN_IDX]
+    template_dict = {'name': "", 'count': 0, 'chars': 0, 'words': 0, 'emoji': 0, 'reactions': 0}
+    stats = [dict(template_dict), dict(template_dict), dict(template_dict)]
 
-for stat in stats:
-    stat['avg_chars'] = int(stat['chars'] / stat['count'])
-    stat['avg_words'] = int(stat['words'] / stat['count'])
-    stat['avg_word_len'] = float(stat['chars'] / stat['words'])
+    time_of_day_counters = [dict(), dict(), dict()]
+    day_of_week_counters = [dict(), dict(), dict()]
+    date_counters = [dict(), dict(), dict()]
+    emoji_counters = [dict(), dict(), dict()]
+    reaction_counters = [dict(), dict(), dict()]
 
-for i in range(0, 24): 
-    time_of_day_counters[TOTAL_IDX][i] = sum(d.get(i, 0) for d in time_of_day_counters[:TOTAL_IDX]) 
+    wordcloud_text = ["", "", ""]
 
-for i in range(0, 7):
-    day_of_week_counters[TOTAL_IDX][i] = sum(d.get(i, 0) for d in day_of_week_counters[:TOTAL_IDX]) 
+    REACTION_TYPES = ['Liked', 'Disliked', 'Loved', 'Laughed', 'Questioned', 'Emphasized']
 
-for i in pandas.date_range(first_msg_time, last_msg_time, freq='1W'):
-    str_date = str((i - datetime.timedelta(days=msg_time.weekday())).date())
-    date_counters[TOTAL_IDX][str_date] = sum(d.get(str_date, 0) for d in date_counters[:TOTAL_IDX]) 
+    for i,d in itertools.product(MY_INDICIES, [stats, time_of_day_counters, day_of_week_counters, date_counters, emoji_counters, reaction_counters]):
+        d[i]['name'] = MY_NAMES[i]
 
-for i in list(set.union(*(set(d.keys()) for d in emoji_counters[:TOTAL_IDX])).difference(['name'])):
-    emoji_counters[TOTAL_IDX][i] = sum(d.get(i, 0) for d in emoji_counters[:TOTAL_IDX])
-    for d in emoji_counters[:TOTAL_IDX]: d[i] = d.get(i, 0)
-    if emoji_counters[TOTAL_IDX][i] < stats[TOTAL_IDX]['emoji'] * .01:
-        #print(f"Emoji Threshold: {stats[TOTAL_IDX]['emoji'] * .01:.0f}")
-        for j in MY_INDICIES:
-            emoji_counters[j]['other'] = emoji_counters[j].get('other', 0) + emoji_counters[j].pop(i)
+    for i,cnt in itertools.product(range(0, 24), time_of_day_counters):
+        cnt[i] = 0
 
-for i in REACTION_TYPES:
-    reaction_counters[TOTAL_IDX][i] = sum(d.get(i, 0) for d in reaction_counters[:TOTAL_IDX]) 
+    for i,cnt in itertools.product(range(0, 7), day_of_week_counters):
+        cnt[i] = 0
 
-BIBLE_WORDS = 783137
-FACEBOOK_WORDS = 23000
-date_diff = last_msg_time - first_msg_time
-date_diff_days = date_diff.total_seconds() / 60 / 60 / 24
-words_per_day = (stats[-1]["words"] + FACEBOOK_WORDS) / date_diff_days
-days_remaining = (BIBLE_WORDS - stats[-1]["words"] - FACEBOOK_WORDS) / words_per_day
-bible_date = datetime.datetime.now() + datetime.timedelta(days = days_remaining)
+    for i,cnt in itertools.product(REACTION_TYPES, reaction_counters):
+        cnt[i] = 0
 
-print("")
-print(tabulate(stats[:TOTAL_IDX] + [{"name": SEPARATING_LINE}, stats[-1]], headers=stat_headers, intfmt=",", floatfmt=".2f", tablefmt="simple"))
+    print(f'Parsing messages...')
+    for msg in filtered_messages:
+        if msg['is_from_me']:
+            idx = WARREN_IDX
+        elif msg['handle_id'] in handle_ids:
+            idx = IRELYN_IDX
+        else:
+            print("Unknown ID: " + str(msg['handle_id']))
+            continue
 
-print("")
-msgs_per_day = stats[-1]["count"] / date_diff_days
-print(f'- Messages Per Day: {msgs_per_day:,.0f}')
-print(f'- First Message Date: {first_msg_time:%A, %B %d, %Y at %I:%M:%S %p %Z}')
-print(f'- Most Recent Message Date: {last_msg_time:%A, %B %d, %Y at %I:%M:%S %p %Z}')
-print(f'- Percent of King James Bible: {float(100 * (stats[-1]["words"] + FACEBOOK_WORDS) / BIBLE_WORDS):.2f}%')
-print(f'- At the current average rate of {words_per_day:,.0f} words per day, it will take us {days_remaining:.0f} days to finish writing our bible, and it will be complete on {bible_date:%A, %B %d, %Y}.')
+        stats[idx]['count'] = stats[idx]['count'] + 1
+        if msg['text']:
+            for pattern in REACTION_TYPES:
+                if msg['text'].startswith(pattern):
+                    stats[idx]['reactions'] += 1
+                    reaction_counters[idx][pattern] += 1
+                    break
+            else:
+                wordcloud_text[idx] += " " + msg['text'].replace("’", "").lower()
+                stats[idx]['chars'] += len(msg['text'])
+                stats[idx]['words'] += len(re.findall(r"\w+", msg['text']))
+                for emj in ''.join(c for c in msg['text'] if c in emoji.EMOJI_DATA):
+                    stats[idx]['emoji'] += 1
+                    emoji_counters[idx][emj] = emoji_counters[idx].get(emj, 0) + 1
 
-end_date = datetime.datetime(1994 + 109, 5, 27, 11, 21, 0, tzinfo=ZoneInfo("America/New_York"))
-days_remaining = (end_date - datetime.datetime.now().replace(tzinfo=ZoneInfo("America/Los_Angeles"))).days
-print(f'- In the {days_remaining / 365.25:.2f} years remaining in our relationship, we will write {msgs_per_day * days_remaining:,.0f} more messages and {days_remaining * words_per_day:,.0f} more words, or {days_remaining * words_per_day / BIBLE_WORDS:,.1f} bibles')
+        # Add the seconds to the Unix epoch
+        msg_time = unix_epoch + datetime.timedelta(seconds=msg['date'] / 10**9)
+        time_of_day_counters[idx][msg_time.hour] = time_of_day_counters[idx][msg_time.hour] + 1
+        day_of_week_counters[idx][msg_time.weekday()] = day_of_week_counters[idx][msg_time.weekday()] + 1
+        str_date = str((msg_time - datetime.timedelta(days=msg_time.weekday())).date())
+        date_counters[idx][str_date] = date_counters[idx].get(str_date, 0) + 1
 
-print("")
-print(tabulate(time_of_day_counters[:TOTAL_IDX] + [{"name": SEPARATING_LINE}, time_of_day_counters[-1]], headers="keys", intfmt=",", floatfmt=".2f", tablefmt="simple"))
+    for key in ['count', 'chars', 'words', 'emoji', 'reactions']:
+        stats[TOTAL_IDX][key] = sum(d.get(key, 0) for d in stats[:TOTAL_IDX])
 
-print("")
-print(tabulate(day_of_week_counters[:TOTAL_IDX] + [{"name": SEPARATING_LINE}, day_of_week_counters[-1]], headers=day_headers, intfmt=",", floatfmt=".2f", tablefmt="simple"))
+    wordcloud_text[TOTAL_IDX] = wordcloud_text[WARREN_IDX] + " " + wordcloud_text[IRELYN_IDX]
 
-date_counters_df = pandas.DataFrame(date_counters).fillna(0).apply(pandas.to_numeric, downcast='integer', errors='ignore').transpose().sort_index()
-date_counters_df = date_counters_df.rename(columns=date_counters_df.iloc[-1]).drop(date_counters_df.index[-1])
-pandas.set_option('display.max_columns', None)
-print("")
-print(date_counters_df.transpose().to_csv())
-#print(tabulate(date_counters[:TOTAL_IDX] + [{"name": SEPARATING_LINE}, date_counters[-1]], headers="keys", intfmt=",", floatfmt=".2f", tablefmt="simple"))
+    for stat in stats:
+        stat['avg_chars'] = int(stat['chars'] / stat['count'])
+        stat['avg_words'] = int(stat['words'] / stat['count'])
+        stat['avg_word_len'] = float(stat['chars'] / stat['words'])
 
-print("")
-print(tabulate(emoji_counters[:TOTAL_IDX] + [{"name": SEPARATING_LINE}, emoji_counters[-1]], headers="keys", intfmt=",", floatfmt=".2f", tablefmt="simple"))
+    for i in range(0, 24): 
+        time_of_day_counters[TOTAL_IDX][i] = sum(d.get(i, 0) for d in time_of_day_counters[:TOTAL_IDX]) 
 
-print("")
-print(tabulate(reaction_counters[:TOTAL_IDX] + [{"name": SEPARATING_LINE}, reaction_counters[-1]], headers=reaction_headers, intfmt=",", floatfmt=".2f", tablefmt="simple"))
+    for i in range(0, 7):
+        day_of_week_counters[TOTAL_IDX][i] = sum(d.get(i, 0) for d in day_of_week_counters[:TOTAL_IDX]) 
+
+    for i in pandas.date_range(first_msg_time, last_msg_time, freq='1W'):
+        str_date = str((i - datetime.timedelta(days=msg_time.weekday())).date())
+        date_counters[TOTAL_IDX][str_date] = sum(d.get(str_date, 0) for d in date_counters[:TOTAL_IDX]) 
+
+    for i in list(set.union(*(set(d.keys()) for d in emoji_counters[:TOTAL_IDX])).difference(['name'])):
+        emoji_counters[TOTAL_IDX][i] = sum(d.get(i, 0) for d in emoji_counters[:TOTAL_IDX])
+        for d in emoji_counters[:TOTAL_IDX]: d[i] = d.get(i, 0)
+        if emoji_counters[TOTAL_IDX][i] < stats[TOTAL_IDX]['emoji'] * .01:
+            #print(f"Emoji Threshold: {stats[TOTAL_IDX]['emoji'] * .01:.0f}")
+            for j in MY_INDICIES:
+                emoji_counters[j]['other'] = emoji_counters[j].get('other', 0) + emoji_counters[j].pop(i)
+
+    for i in REACTION_TYPES:
+        reaction_counters[TOTAL_IDX][i] = sum(d.get(i, 0) for d in reaction_counters[:TOTAL_IDX]) 
+
+    print(f'Exporting tables...')
+    export_to_csv(stats, "stats.csv", headers=stat_headers)
+    export_to_csv(time_of_day_counters, "time_of_day_counters.csv")
+    export_to_csv(day_of_week_counters, "day_of_week_counters.csv", headers=day_headers)
+    export_to_csv(date_counters, "date_counters.csv")
+    export_to_csv(emoji_counters, "emoji_counters.csv")
+    export_to_csv(reaction_counters, 'reaction_counters.csv', reaction_headers)
+
+    print("Creating wordclouds...")
+    llama_mask = np.array(Image.open("llama.jpg"))
+    cloud_colors = [ 'cool', 'autumn', 'plasma']
+    for i in MY_INDICIES:
+        WordCloud(background_color="white", max_words=2000, mask=llama_mask, contour_width=0, colormap=cloud_colors[i], min_word_length=3).generate(wordcloud_text[i]).to_file(f'cloud_{MY_NAMES[i].lower()}.png')
+
+    print("Done!")
+
+    BIBLE_WORDS = 783137
+    FACEBOOK_WORDS = 23000
+    date_diff = last_msg_time - first_msg_time
+    date_diff_days = date_diff.total_seconds() / 60 / 60 / 24
+    msgs_per_day = stats[-1]["count"] / date_diff_days
+    words_per_day = (stats[-1]["words"] + FACEBOOK_WORDS) / date_diff_days
+    days_remaining = (BIBLE_WORDS - stats[-1]["words"] - FACEBOOK_WORDS) / words_per_day
+    bible_date = datetime.datetime.now() + datetime.timedelta(days = days_remaining)
+    
+    end_date = datetime.datetime(1994 + 109, 5, 27, 11, 21, 0, tzinfo=ZoneInfo("America/New_York"))
+    days_remaining = (end_date - datetime.datetime.now().replace(tzinfo=ZoneInfo("America/Los_Angeles"))).days
+
+    print("")
+    print(f'- Messages Per Day: {msgs_per_day:,.0f}')
+    print(f'- First Message Date: {first_msg_time:%A, %B %d, %Y at %I:%M:%S %p %Z}')
+    print(f'- Most Recent Message Date: {last_msg_time:%A, %B %d, %Y at %I:%M:%S %p %Z}')
+    print(f'- Percent of King James Bible: {float(100 * (stats[-1]["words"] + FACEBOOK_WORDS) / BIBLE_WORDS):.2f}%')
+    print(f'- At the current average rate of {words_per_day:,.0f} words per day, it will take us {days_remaining:.0f} days to finish writing our bible, and it will be complete on {bible_date:%A, %B %d, %Y}.')
+    print(f'- In the {days_remaining / 365.25:.2f} years remaining in our relationship, we will write {msgs_per_day * days_remaining:,.0f} more messages and {days_remaining * words_per_day:,.0f} more words, or {days_remaining * words_per_day / BIBLE_WORDS:,.1f} bibles')
+    print("")
 
 
-# read the mask image
-# taken from
-# http://www.stencilry.org/stencils/movies/alice%20in%20wonderland/255fk.jpg
-llama_mask = np.array(Image.open("llama.jpg"))
-
-stopwords = set(STOPWORDS)
-
-cloud_colors = [ 'cool', 'autumn', 'plasma']
-for i in MY_INDICIES:
-    WordCloud(background_color="white", max_words=2000, mask=llama_mask,
-               stopwords=stopwords, contour_width=0, colormap=cloud_colors[i], min_word_length=3).generate(wordcloud_text[i]).to_file(f'cloud_{MY_NAMES[i].lower()}.png')
+if __name__ == "__main__":
+    main()
 
 # First message count
 # Last message count
