@@ -14,6 +14,7 @@ from PIL import Image
 import numpy as np
 from wordcloud import WordCloud
 import argparse
+import time
 
 ########## DEFINES ##########
 stat_headers = {
@@ -60,6 +61,7 @@ def load_messages(phone_number):
     chats = load_json_data("chats.json")
     handles = load_json_data("handles.json")
     messages = load_json_data("messages.json")
+    print(f"Processed {len(attachments) + len(chat2handles) + len(chats) + len(handles) + len(messages):,d} total records.")
 
     handle_ids = [h['rowid'] for h in handles if h['id'].find(phone_number) != -1]
     # print('Handles: ' + str(handle_ids))
@@ -70,8 +72,8 @@ def load_messages(phone_number):
     return handle_ids, sorted([m for m in messages if m['chat_id'] in chat_ids], key=lambda d: d['date'])
 
 def export_to_csv(data, filename, headers = None):
-    df = pandas.DataFrame(data)
-    # df = df.rename(columns=df.iloc[-1]).drop(df.index[-1])
+    df = pandas.DataFrame(data).fillna(0)
+    df = df.rename(columns=df.iloc[-1]).drop(df.index[-1])
     if headers:
         df = df.rename(columns=headers)
 
@@ -83,15 +85,19 @@ def main():
     parser.add_argument('-p', '--phone-number', type=str, help='Phone number to analyze', required=True)
     args = parser.parse_args()
 
-    print("Compiling and running imessage-exporter...")
     if args.update_data:
-        subprocess.run(["cargo", "run", "--release", "--bin", "imessage-stats"])
+        print("Compiling and running imessage-exporter...")
+        segment_start = time.time()
+        subprocess.run(["cargo", "run", "--release", "--bin", "imessage-stats"], stdout=subprocess.DEVNULL)
+        print(f"Done! Took {time.time() - segment_start:.2f} seconds.\n")
 
     # Define the MacOS epoch
     unix_epoch = datetime.datetime(2001, 1, 1, 0, 0, 0, tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo("America/Los_Angeles"))
     
     print(f'Loading messages for phone number {args.phone_number}...')
+    segment_start = time.time()
     handle_ids, filtered_messages = load_messages(args.phone_number)
+    print(f"Found {len(filtered_messages):,d} messages for phone number {args.phone_number}")
     # print(len(filtered_messages))
 
     # Define the Unix epoch
@@ -132,7 +138,10 @@ def main():
     for i,cnt in itertools.product(REACTION_TYPES, reaction_counters):
         cnt[i] = 0
 
+    print(f"Done! Took {time.time() - segment_start:.2f} seconds.\n")
+
     print(f'Parsing messages...')
+    segment_start = time.time()
     for msg in filtered_messages:
         if msg['is_from_me']:
             idx = WARREN_IDX
@@ -180,36 +189,45 @@ def main():
     for i in range(0, 7):
         day_of_week_counters[TOTAL_IDX][i] = sum(d.get(i, 0) for d in day_of_week_counters[:TOTAL_IDX]) 
 
-    for i in pandas.date_range(first_msg_time, last_msg_time, freq='1W'):
-        str_date = str((i - datetime.timedelta(days=msg_time.weekday())).date())
+    for i in pandas.date_range(first_msg_time, last_msg_time + datetime.timedelta(days=7), freq='1W'):
+        str_date = str((i - datetime.timedelta(days=i.weekday())).date())
         date_counters[TOTAL_IDX][str_date] = sum(d.get(str_date, 0) for d in date_counters[:TOTAL_IDX]) 
+    date_df = pandas.DataFrame(date_counters, columns=list(date_counters[TOTAL_IDX].keys())).fillna(0)
 
     for i in list(set.union(*(set(d.keys()) for d in emoji_counters[:TOTAL_IDX])).difference(['name'])):
         emoji_counters[TOTAL_IDX][i] = sum(d.get(i, 0) for d in emoji_counters[:TOTAL_IDX])
         for d in emoji_counters[:TOTAL_IDX]: d[i] = d.get(i, 0)
-        if emoji_counters[TOTAL_IDX][i] < stats[TOTAL_IDX]['emoji'] * .01:
-            #print(f"Emoji Threshold: {stats[TOTAL_IDX]['emoji'] * .01:.0f}")
-            for j in MY_INDICIES:
-                emoji_counters[j]['other'] = emoji_counters[j].get('other', 0) + emoji_counters[j].pop(i)
+
+    emoji_df = pandas.DataFrame(emoji_counters).transpose()
+    emoji_df.iloc[1:] = emoji_df.iloc[1:].sort_values(by=TOTAL_IDX, ascending=False)
+    if emoji_df.shape[0] > 11:
+        temp_df = pandas.DataFrame(emoji_df.iloc[12:].sum()).transpose()
+        temp_df.index = ['Other']
+        emoji_df = pandas.concat([emoji_df[:11], temp_df])
+    emoji_df = emoji_df.transpose()
 
     for i in REACTION_TYPES:
         reaction_counters[TOTAL_IDX][i] = sum(d.get(i, 0) for d in reaction_counters[:TOTAL_IDX]) 
+    print(f"Done! Took {time.time() - segment_start:.2f} seconds.\n")
 
     print(f'Exporting tables...')
+    segment_start = time.time()
     export_to_csv(stats, "stats.csv", headers=stat_headers)
     export_to_csv(time_of_day_counters, "time_of_day_counters.csv")
     export_to_csv(day_of_week_counters, "day_of_week_counters.csv", headers=day_headers)
-    export_to_csv(date_counters, "date_counters.csv")
-    export_to_csv(emoji_counters, "emoji_counters.csv")
+    export_to_csv(date_df, "date_counters.csv")
+    export_to_csv(emoji_df, "emoji_counters.csv")
     export_to_csv(reaction_counters, 'reaction_counters.csv', reaction_headers)
+    print(f"Done! Took {time.time() - segment_start:.2f} seconds.\n")
 
     print("Creating wordclouds...")
+    segment_start = time.time()
     llama_mask = np.array(Image.open("llama.jpg"))
     cloud_colors = [ 'cool', 'autumn', 'plasma']
     for i in MY_INDICIES:
         WordCloud(background_color="white", max_words=2000, mask=llama_mask, contour_width=0, colormap=cloud_colors[i], min_word_length=3).generate(wordcloud_text[i]).to_file(f'cloud_{MY_NAMES[i].lower()}.png')
 
-    print("Done!")
+    print(f"Done! Took {time.time() - segment_start:.2f} seconds.\n")
 
     BIBLE_WORDS = 783137
     FACEBOOK_WORDS = 23000
@@ -221,7 +239,7 @@ def main():
     bible_date = datetime.datetime.now() + datetime.timedelta(days = days_remaining)
     
     end_date = datetime.datetime(1994 + 109, 5, 27, 11, 21, 0, tzinfo=ZoneInfo("America/New_York"))
-    days_remaining = (end_date - datetime.datetime.now().replace(tzinfo=ZoneInfo("America/Los_Angeles"))).days
+    our_days_remaining = (end_date - datetime.datetime.now().replace(tzinfo=ZoneInfo("America/Los_Angeles"))).days
 
     print("")
     print(f'- Messages Per Day: {msgs_per_day:,.0f}')
@@ -229,7 +247,7 @@ def main():
     print(f'- Most Recent Message Date: {last_msg_time:%A, %B %d, %Y at %I:%M:%S %p %Z}')
     print(f'- Percent of King James Bible: {float(100 * (stats[-1]["words"] + FACEBOOK_WORDS) / BIBLE_WORDS):.2f}%')
     print(f'- At the current average rate of {words_per_day:,.0f} words per day, it will take us {days_remaining:.0f} days to finish writing our bible, and it will be complete on {bible_date:%A, %B %d, %Y}.')
-    print(f'- In the {days_remaining / 365.25:.2f} years remaining in our relationship, we will write {msgs_per_day * days_remaining:,.0f} more messages and {days_remaining * words_per_day:,.0f} more words, or {days_remaining * words_per_day / BIBLE_WORDS:,.1f} bibles')
+    print(f'- In the {our_days_remaining / 365.25:.2f} years remaining in our relationship, we will write {msgs_per_day * our_days_remaining:,.0f} more messages and {our_days_remaining * words_per_day:,.0f} more words, or {our_days_remaining * words_per_day / BIBLE_WORDS:,.1f} bibles')
     print("")
 
 
