@@ -82,6 +82,8 @@ def main():
     parser = argparse.ArgumentParser(description='Process iMessage data.')
     parser.add_argument('-u', '--update-data', action='store_true', help='Re-run the iMessage data export')
     parser.add_argument('-p', '--phone-number', type=str, help='Phone number to analyze', required=True)
+    parser.add_argument('-s', '--start-date', type='str', help='Earliest message date to include', required=False, default='1990-1-1')
+    parser.add_argument('-e', '--end-date', type='str', help='Latest message date to include', required=False, default='2111-1-1')
     args = parser.parse_args()
 
     if args.update_data:
@@ -97,7 +99,12 @@ def main():
     segment_start = time.time()
     handle_ids, filtered_messages = load_messages(args.phone_number)
     print(f"Found {len(filtered_messages):,d} messages for phone number {args.phone_number}")
-    # print(len(filtered_messages))
+
+    # Remove messages outside the bounds of start_date and end_date
+    start_date = datetime.datetime.strptime(args.start_date, '%Y-%m-%d')
+    end_date = datetime.datetime.strptime(args.end_date, '%Y-%m-%d')
+    filtered_messages = [msg for msg in filtered_messages if start_date <= datetime.datetime.fromtimestamp(msg['date'] / 10**9) <= end_date]
+    print("Filtered to " + str(len(filtered_messages)) + " messages between " + str(start_date) + " and " + str(end_date) + ".")
 
     # Define the Unix epoch
     unix_epoch = datetime.datetime(2001, 1, 1, 0, 0, 0, tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo("America/Los_Angeles"))
