@@ -3,7 +3,6 @@
 ########## IMPORTS ##########
 import json
 import re
-from tabulate import tabulate, SEPARATING_LINE
 import subprocess
 import datetime
 from zoneinfo import ZoneInfo
@@ -73,7 +72,7 @@ def load_messages(phone_number):
 
 def export_to_csv(data, filename, headers = None):
     df = pandas.DataFrame(data).fillna(0)
-    df = df.rename(columns=df.iloc[-1]).drop(df.index[-1])
+    
     if headers:
         df = df.rename(columns=headers)
 
@@ -106,6 +105,8 @@ def main():
     # Add the seconds to the Unix epoch
     first_msg_time = unix_epoch + datetime.timedelta(seconds=filtered_messages[0]['date'] / 10**9)
     last_msg_time = unix_epoch + datetime.timedelta(seconds=filtered_messages[-1]['date'] / 10**9)
+    end_date = datetime.datetime(1994 + 109, 5, 27, 8, 21, 0, tzinfo=ZoneInfo("America/Los_Angeles"))
+    our_days_remaining = (end_date - datetime.datetime.now().replace(tzinfo=ZoneInfo("America/Los_Angeles"))).days
 
     IRELYN_IDX=0
     WARREN_IDX=1
@@ -189,7 +190,7 @@ def main():
     for i in range(0, 7):
         day_of_week_counters[TOTAL_IDX][i] = sum(d.get(i, 0) for d in day_of_week_counters[:TOTAL_IDX]) 
 
-    for i in pandas.date_range(first_msg_time, last_msg_time + datetime.timedelta(days=7), freq='1W'):
+    for i in pandas.date_range(first_msg_time, end_date + datetime.timedelta(days=1), freq='1W', inclusive='both', normalize=True):
         str_date = str((i - datetime.timedelta(days=i.weekday())).date())
         date_counters[TOTAL_IDX][str_date] = sum(d.get(str_date, 0) for d in date_counters[:TOTAL_IDX]) 
     date_df = pandas.DataFrame(date_counters, columns=list(date_counters[TOTAL_IDX].keys())).fillna(0)
@@ -223,13 +224,13 @@ def main():
     print("Creating wordclouds...")
     segment_start = time.time()
     llama_mask = np.array(Image.open("llama.jpg"))
-    cloud_colors = [ 'cool', 'autumn', 'plasma']
+    cloud_colors = [ 'cool', 'autumn', 'plasma' ]
     for i in MY_INDICIES:
         WordCloud(background_color="white", max_words=2000, mask=llama_mask, contour_width=0, colormap=cloud_colors[i], min_word_length=3).generate(wordcloud_text[i]).to_file(f'cloud_{MY_NAMES[i].lower()}.png')
 
     print(f"Done! Took {time.time() - segment_start:.2f} seconds.\n")
 
-    BIBLE_WORDS = 783137
+    BIBLE_WORDS =   783137
     FACEBOOK_WORDS = 23000
     date_diff = last_msg_time - first_msg_time
     date_diff_days = date_diff.total_seconds() / 60 / 60 / 24
@@ -238,9 +239,6 @@ def main():
     days_remaining = (BIBLE_WORDS - stats[-1]["words"] - FACEBOOK_WORDS) / words_per_day
     bible_date = datetime.datetime.now() + datetime.timedelta(days = days_remaining)
     
-    end_date = datetime.datetime(1994 + 109, 5, 27, 11, 21, 0, tzinfo=ZoneInfo("America/New_York"))
-    our_days_remaining = (end_date - datetime.datetime.now().replace(tzinfo=ZoneInfo("America/Los_Angeles"))).days
-
     print("")
     print(f'- Messages Per Day: {msgs_per_day:,.0f}')
     print(f'- First Message Date: {first_msg_time:%A, %B %d, %Y at %I:%M:%S %p %Z}')
