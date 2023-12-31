@@ -14,6 +14,8 @@ import numpy as np
 from wordcloud import WordCloud
 import argparse
 import time
+import concurrent.futures
+
 
 ########## DEFINES ##########
 stat_headers = {
@@ -27,6 +29,8 @@ stat_headers = {
     'emoji': 'Total Emoji Count',
     'reactions': 'Total Reaction Count',
     'attachments': 'Total Attachment Count',
+    'avg_delta': 'Avg Reply Time',
+    'avg_spec_delta': 'Avg Direct Reply Time',
 }
 
 day_headers = {
@@ -93,6 +97,9 @@ def export_to_csv(data, filename, headers = None):
 
     df.to_csv(filename, index=False)
 
+def create_wordcloud(thecolor, thefile, thetext, themask):
+    WordCloud(background_color="white", max_words=2000, mask=themask, contour_width=0, colormap=thecolor, min_word_length=3).generate(thetext).to_file(thefile)
+
 def main():
     parser = argparse.ArgumentParser(description='Process iMessage data.')
     parser.add_argument('-u', '--update-data', action='store_true', help='Re-run the iMessage data export')
@@ -119,6 +126,7 @@ def main():
     start_date = datetime.datetime.strptime(args.start_date, '%Y-%m-%d').replace(tzinfo=ZoneInfo("America/Los_Angeles"))
     end_date = datetime.datetime.strptime(args.end_date, '%Y-%m-%d').replace(tzinfo=ZoneInfo("America/Los_Angeles"))
     filtered_messages = [msg for msg in filtered_messages if start_date <= (unix_epoch + datetime.timedelta(seconds=msg['date'] / 10**9)) <= end_date]
+    threads = dict()
     print(f"\tFiltered to {len(filtered_messages):,d} messages between {start_date.date()} and {end_date.date()}.")
 
     # Define the Unix epoch
@@ -146,11 +154,17 @@ def main():
     reaction_counters = [dict(), dict(), dict()]
     attachment_counters = [dict(), dict(), dict()]
 
+    reply_template = {'name': "", 'count': 0, 'delta': 0.0}
+    reply_stats = [dict(reply_template), dict(reply_template), dict(reply_template)]
+    reply_tracker = dict()
+    reply_tracker['curr_idx'] = WARREN_IDX if filtered_messages[0]['is_from_me'] else IRELYN_IDX
+    reply_tracker['last_msg_time'] = first_msg_time
+
     wordcloud_text = ["", "", ""]
 
     REACTION_TYPES = ['Liked', 'Disliked', 'Loved', 'Laughed', 'Questioned', 'Emphasized']
 
-    for i,d in itertools.product(MY_INDICIES, [stats, time_of_day_counters, day_of_week_counters, date_counters, emoji_counters, reaction_counters, attachment_counters]):
+    for i,d in itertools.product(MY_INDICIES, [stats, time_of_day_counters, day_of_week_counters, date_counters, emoji_counters, reaction_counters, attachment_counters, reply_stats]):
         d[i]['name'] = MY_NAMES[i]
 
     for i,cnt in itertools.product(range(0, 24), time_of_day_counters):
@@ -214,6 +228,34 @@ def main():
         str_date = str((msg_time - datetime.timedelta(days=msg_time.weekday())).date())
         date_counters[idx][str_date] = date_counters[idx].get(str_date, 0) + 1
 
+        # Reply Stats
+        if reply_tracker['curr_idx'] != idx:
+            reply_stats[idx]['count'] += 1
+            reply_stats[idx]['delta'] += (msg_time - reply_tracker['last_msg_time']).total_seconds()
+            reply_tracker['curr_idx'] = idx
+            reply_tracker['last_msg_time'] = msg_time
+
+        msg['parser_idx'] = idx
+        msg['parser_time'] = msg_time
+        if msg['thread_originator_guid']:
+            threads[msg['thread_originator_guid']] += [msg]
+        else:
+            threads[msg['guid']] = [msg]
+    
+    specific_reply_stats = [dict(reply_template), dict(reply_template), dict(reply_template)]
+    specific_reply_tracker = dict()
+    
+    for thread in threads.values():
+        if len(thread) > 1:
+            specific_reply_tracker['curr_idx'] = thread[0]['parser_idx']
+            specific_reply_tracker['last_msg_time'] = thread[0]['parser_time']
+            for msg in thread:
+                if msg['parser_idx'] != specific_reply_tracker['curr_idx']:
+                    specific_reply_stats[msg['parser_idx']]['count'] += 1
+                    specific_reply_stats[msg['parser_idx']]['delta'] += (msg['parser_time'] - specific_reply_tracker['last_msg_time']).total_seconds()
+                    specific_reply_tracker['curr_idx'] = msg['parser_idx']
+                    specific_reply_tracker['last_msg_time'] = msg['parser_time']
+
     for key in ['count', 'chars', 'words', 'emoji', 'reactions', 'attachments']:
         stats[TOTAL_IDX][key] = sum(d.get(key, 0) for d in stats[:TOTAL_IDX])
 
@@ -254,6 +296,14 @@ def main():
     for i in list(set.union(*(set(d.keys()) for d in attachment_counters[:TOTAL_IDX])).difference(['name'])):
         attachment_counters[TOTAL_IDX][i] = sum(d.get(i, 0) for d in attachment_counters[:TOTAL_IDX])
         for d in attachment_counters[:TOTAL_IDX]: d[i] = d.get(i, 0)
+    
+    for key in ['count', 'delta']:
+        reply_stats[TOTAL_IDX][key] = sum(d.get(key, 0) for d in reply_stats[:TOTAL_IDX])
+        specific_reply_stats[TOTAL_IDX][key] = sum(d.get(key, 0) for d in specific_reply_stats[:TOTAL_IDX])
+
+    for i in MY_INDICIES:
+        stats[i]['avg_delta'] = str(datetime.timedelta(seconds=(reply_stats[i]['delta'] / reply_stats[i]['count'])))
+        stats[i]['avg_spec_delta'] = str(datetime.timedelta(seconds=(specific_reply_stats[i]['delta'] / specific_reply_stats[i]['count'])))
 
     print(f"Done! Took {time.time() - segment_start:.2f} seconds.\n")
 
@@ -272,8 +322,19 @@ def main():
     segment_start = time.time()
     llama_mask = np.array(Image.open("llama.jpg"))
     cloud_colors = [ 'cool', 'autumn', 'plasma' ]
-    for i in MY_INDICIES:
-        WordCloud(background_color="white", max_words=2000, mask=llama_mask, contour_width=0, colormap=cloud_colors[i], min_word_length=3).generate(wordcloud_text[i]).to_file(f'cloud_{MY_NAMES[i].lower()}.png')
+
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        futures = [executor.submit(create_wordcloud, cloud_colors[i], f'cloud_{MY_NAMES[i]}.png', wordcloud_text[i], llama_mask) for i in MY_INDICIES]
+
+    print(len(futures))
+
+    # Wait for all processes to complete
+    for future in concurrent.futures.as_completed(futures):
+        try:
+            # If the call raised an exception, this will re-raise it
+            future.result()
+        except Exception as e:
+            print(f"An error occurred: {e}")
 
     print(f"Done! Took {time.time() - segment_start:.2f} seconds.\n")
 
@@ -301,8 +362,8 @@ if __name__ == "__main__":
 
 # First message count
 # Last message count
-# Average response time
-# Average individual message reply time
+# DONE Average response time
+# DONE Average individual message reply time
 # DONE Total attachments
 # DONE Types of attachments
 # DONE Reaction Stats
