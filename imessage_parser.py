@@ -25,7 +25,8 @@ stat_headers = {
     'avg_words': 'Avg Words Per Msg',
     'avg_word_len': 'Avg Chars Per Word',
     'emoji': 'Total Emoji Count',
-    'reactions': 'Total Reaction Count'
+    'reactions': 'Total Reaction Count',
+    'attachments': 'Total Attachment Count',
 }
 
 day_headers = {
@@ -49,6 +50,14 @@ reaction_headers = {
     'Emphasized': '❗️'
 }
 
+attachment_headers = {
+    'gif' : 'GIF',
+    'pic' : 'Picture',
+    'vid' : 'Video',
+    'aud' : 'Audio',
+    'loc' : 'Location'
+}
+
 def load_json_data(filename):
     with open(filename, "r") as f:
         data = f.read()
@@ -63,12 +72,18 @@ def load_messages(phone_number):
     print(f"\tProcessed {len(attachments) + len(chat2handles) + len(chats) + len(handles) + len(messages):,d} total records.")
 
     handle_ids = [h['rowid'] for h in handles if h['id'].find(phone_number) != -1]
-    # print('Handles: ' + str(handle_ids))
 
     chat_ids = [h['chat_id'] for h in chat2handles if h['handle_id'] in handle_ids]
-    # print('Chats: ' + str(chat_ids))
+    
+    attc_dict = dict()
+    for attc in attachments:
+        attc_dict[attc['message_id']] = attc_dict.get(attc['message_id'], []) + [attc]
 
-    return handle_ids, sorted([m for m in messages if m['chat_id'] in chat_ids], key=lambda d: d['date'])
+    messages = sorted([m for m in messages if m['chat_id'] in chat_ids], key=lambda d: d['date'])
+    for msg in messages:
+        msg['attachments'] = attc_dict.get(msg['rowid'], [])
+
+    return handle_ids, messages
 
 def export_to_csv(data, filename, headers = None):
     df = pandas.DataFrame(data).fillna(0)
@@ -121,7 +136,7 @@ def main():
     MY_INDICIES=[IRELYN_IDX, WARREN_IDX, TOTAL_IDX]
     MY_NAMES=['Irelyn', 'Warren', 'TOTAL']
 
-    template_dict = {'name': "", 'count': 0, 'chars': 0, 'words': 0, 'emoji': 0, 'reactions': 0}
+    template_dict = {'name': "", 'count': 0, 'chars': 0, 'words': 0, 'emoji': 0, 'reactions': 0, 'attachments': 0}
     stats = [dict(template_dict), dict(template_dict), dict(template_dict)]
 
     time_of_day_counters = [dict(), dict(), dict()]
@@ -129,12 +144,13 @@ def main():
     date_counters = [dict(), dict(), dict()]
     emoji_counters = [dict(), dict(), dict()]
     reaction_counters = [dict(), dict(), dict()]
+    attachment_counters = [dict(), dict(), dict()]
 
     wordcloud_text = ["", "", ""]
 
     REACTION_TYPES = ['Liked', 'Disliked', 'Loved', 'Laughed', 'Questioned', 'Emphasized']
 
-    for i,d in itertools.product(MY_INDICIES, [stats, time_of_day_counters, day_of_week_counters, date_counters, emoji_counters, reaction_counters]):
+    for i,d in itertools.product(MY_INDICIES, [stats, time_of_day_counters, day_of_week_counters, date_counters, emoji_counters, reaction_counters, attachment_counters]):
         d[i]['name'] = MY_NAMES[i]
 
     for i,cnt in itertools.product(range(0, 24), time_of_day_counters):
@@ -159,7 +175,8 @@ def main():
             print("Unknown ID: " + str(msg['handle_id']))
             continue
 
-        stats[idx]['count'] = stats[idx]['count'] + 1
+        stats[idx]['count'] += 1
+        stats[idx]['attachments'] += len(msg['attachments'])
         if msg['text']:
             for pattern in REACTION_TYPES:
                 if msg['text'].startswith(pattern):
@@ -174,6 +191,22 @@ def main():
                     stats[idx]['emoji'] += 1
                     emoji_counters[idx][emj] = emoji_counters[idx].get(emj, 0) + 1
 
+        for attc in msg['attachments']:
+            if attc['mime_type']:
+                if attc['mime_type'].startswith('image'):
+                    if attc['mime_type'].startswith('image/gif'):
+                        attachment_counters[idx]['gif'] = attachment_counters[idx].get('gif', 0) + 1
+                    else:
+                        attachment_counters[idx]['pic'] = attachment_counters[idx].get('pic', 0) + 1
+                elif attc['mime_type'].startswith('video'):
+                    attachment_counters[idx]['vid'] = attachment_counters[idx].get('vid', 0) + 1
+                elif attc['mime_type'].startswith('audio'):
+                    attachment_counters[idx]['aud'] = attachment_counters[idx].get('aud', 0) + 1
+                elif attc['mime_type'].startswith('text/x-vlocation'):
+                    attachment_counters[idx]['loc'] = attachment_counters[idx].get('loc', 0) + 1
+                else:
+                    attachment_counters[idx][attc['mime_type']] = attachment_counters[idx].get(attc['mime_type'], 0) + 1
+
         # Add the seconds to the Unix epoch
         msg_time = unix_epoch + datetime.timedelta(seconds=msg['date'] / 10**9)
         time_of_day_counters[idx][msg_time.hour] = time_of_day_counters[idx][msg_time.hour] + 1
@@ -181,7 +214,7 @@ def main():
         str_date = str((msg_time - datetime.timedelta(days=msg_time.weekday())).date())
         date_counters[idx][str_date] = date_counters[idx].get(str_date, 0) + 1
 
-    for key in ['count', 'chars', 'words', 'emoji', 'reactions']:
+    for key in ['count', 'chars', 'words', 'emoji', 'reactions', 'attachments']:
         stats[TOTAL_IDX][key] = sum(d.get(key, 0) for d in stats[:TOTAL_IDX])
 
     wordcloud_text[TOTAL_IDX] = wordcloud_text[WARREN_IDX] + " " + wordcloud_text[IRELYN_IDX]
@@ -217,6 +250,11 @@ def main():
 
     for i in REACTION_TYPES:
         reaction_counters[TOTAL_IDX][i] = sum(d.get(i, 0) for d in reaction_counters[:TOTAL_IDX]) 
+
+    for i in list(set.union(*(set(d.keys()) for d in attachment_counters[:TOTAL_IDX])).difference(['name'])):
+        attachment_counters[TOTAL_IDX][i] = sum(d.get(i, 0) for d in attachment_counters[:TOTAL_IDX])
+        for d in attachment_counters[:TOTAL_IDX]: d[i] = d.get(i, 0)
+
     print(f"Done! Took {time.time() - segment_start:.2f} seconds.\n")
 
     print(f'Exporting tables...')
@@ -227,6 +265,7 @@ def main():
     export_to_csv(date_df, "date_counters.csv")
     export_to_csv(emoji_df, "emoji_counters.csv")
     export_to_csv(reaction_counters, 'reaction_counters.csv', reaction_headers)
+    export_to_csv(attachment_counters, 'attachment_counters.csv', attachment_headers)
     print(f"Done! Took {time.time() - segment_start:.2f} seconds.\n")
 
     print("Creating wordclouds...")
@@ -263,9 +302,9 @@ if __name__ == "__main__":
 # First message count
 # Last message count
 # Average response time
-# Total attachments
-# Types of attachments
 # Average individual message reply time
+# DONE Total attachments
+# DONE Types of attachments
 # DONE Reaction Stats
 # DONE Peak time of day (graph)
 # DONE Peak day of week (graph)
