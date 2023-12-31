@@ -60,7 +60,7 @@ def load_messages(phone_number):
     chats = load_json_data("chats.json")
     handles = load_json_data("handles.json")
     messages = load_json_data("messages.json")
-    print(f"Processed {len(attachments) + len(chat2handles) + len(chats) + len(handles) + len(messages):,d} total records.")
+    print(f"\tProcessed {len(attachments) + len(chat2handles) + len(chats) + len(handles) + len(messages):,d} total records.")
 
     handle_ids = [h['rowid'] for h in handles if h['id'].find(phone_number) != -1]
     # print('Handles: ' + str(handle_ids))
@@ -82,8 +82,8 @@ def main():
     parser = argparse.ArgumentParser(description='Process iMessage data.')
     parser.add_argument('-u', '--update-data', action='store_true', help='Re-run the iMessage data export')
     parser.add_argument('-p', '--phone-number', type=str, help='Phone number to analyze', required=True)
-    parser.add_argument('-s', '--start-date', type='str', help='Earliest message date to include', required=False, default='1990-1-1')
-    parser.add_argument('-e', '--end-date', type='str', help='Latest message date to include', required=False, default='2111-1-1')
+    parser.add_argument('-s', '--start-date', type=str, help='Earliest message date to include', required=False, default='1990-1-1')
+    parser.add_argument('-e', '--end-date', type=str, help='Latest message date to include', required=False, default='2111-1-1')
     args = parser.parse_args()
 
     if args.update_data:
@@ -98,13 +98,13 @@ def main():
     print(f'Loading messages for phone number {args.phone_number}...')
     segment_start = time.time()
     handle_ids, filtered_messages = load_messages(args.phone_number)
-    print(f"Found {len(filtered_messages):,d} messages for phone number {args.phone_number}")
+    print(f"\tFound {len(filtered_messages):,d} messages for phone number {args.phone_number}")
 
     # Remove messages outside the bounds of start_date and end_date
-    start_date = datetime.datetime.strptime(args.start_date, '%Y-%m-%d')
-    end_date = datetime.datetime.strptime(args.end_date, '%Y-%m-%d')
-    filtered_messages = [msg for msg in filtered_messages if start_date <= datetime.datetime.fromtimestamp(msg['date'] / 10**9) <= end_date]
-    print("Filtered to " + str(len(filtered_messages)) + " messages between " + str(start_date) + " and " + str(end_date) + ".")
+    start_date = datetime.datetime.strptime(args.start_date, '%Y-%m-%d').replace(tzinfo=ZoneInfo("America/Los_Angeles"))
+    end_date = datetime.datetime.strptime(args.end_date, '%Y-%m-%d').replace(tzinfo=ZoneInfo("America/Los_Angeles"))
+    filtered_messages = [msg for msg in filtered_messages if start_date <= (unix_epoch + datetime.timedelta(seconds=msg['date'] / 10**9)) <= end_date]
+    print(f"\tFiltered to {len(filtered_messages):,d} messages between {start_date.date()} and {end_date.date()}.")
 
     # Define the Unix epoch
     unix_epoch = datetime.datetime(2001, 1, 1, 0, 0, 0, tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo("America/Los_Angeles"))
@@ -206,13 +206,14 @@ def main():
         emoji_counters[TOTAL_IDX][i] = sum(d.get(i, 0) for d in emoji_counters[:TOTAL_IDX])
         for d in emoji_counters[:TOTAL_IDX]: d[i] = d.get(i, 0)
 
-    emoji_df = pandas.DataFrame(emoji_counters).transpose()
-    emoji_df.iloc[1:] = emoji_df.iloc[1:].sort_values(by=TOTAL_IDX, ascending=False)
-    if emoji_df.shape[0] > 11:
-        temp_df = pandas.DataFrame(emoji_df.iloc[12:].sum()).transpose()
+    emoji_df = pandas.DataFrame(emoji_counters).fillna(0).iloc[:,1:]    
+    emoji_df = emoji_df.iloc[:, np.flip(np.argsort(emoji_df.loc[TOTAL_IDX]))].transpose()
+    if emoji_df.shape[0] > 10:
+        temp_df = pandas.DataFrame(emoji_df.iloc[10:].sum()).transpose()
         temp_df.index = ['Other']
-        emoji_df = pandas.concat([emoji_df[:11], temp_df])
+        emoji_df = pandas.concat([emoji_df[:10], temp_df])
     emoji_df = emoji_df.transpose()
+    emoji_df = pandas.concat([pandas.DataFrame(MY_NAMES, columns=['name']), emoji_df], axis=1)
 
     for i in REACTION_TYPES:
         reaction_counters[TOTAL_IDX][i] = sum(d.get(i, 0) for d in reaction_counters[:TOTAL_IDX]) 
@@ -272,11 +273,10 @@ if __name__ == "__main__":
 # DONE Emoji usage
 # DONE Most used emojis
 # DONE Word cloud
-# Stats pre and post break
+# DONE Stats pre and post break
 # Documentation
 
 # Parse and splice facebook messages
-# Aggregate stats over time????
 # App
 # Parameterize stuff
 # Refactor into functions
