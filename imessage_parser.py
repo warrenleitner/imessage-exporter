@@ -29,8 +29,8 @@ stat_headers = {
     'emoji': 'Total Emoji Count',
     'reactions': 'Total Reaction Count',
     'attachments': 'Total Attachment Count',
-    'avg_delta': 'Avg Reply Time',
-    'avg_spec_delta': 'Avg Direct Reply Time',
+    'avg_delta': 'Avg Reply Time (s)',
+    'avg_spec_delta': 'Avg Direct Reply Time (s)',
 }
 
 day_headers = {
@@ -238,7 +238,7 @@ def main():
         msg['parser_idx'] = idx
         msg['parser_time'] = msg_time
         if msg['thread_originator_guid']:
-            threads[msg['thread_originator_guid']] += [msg]
+            threads[msg['thread_originator_guid']] = threads.get(msg['thread_originator_guid'], []) + [msg]
         else:
             threads[msg['guid']] = [msg]
     
