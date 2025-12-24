@@ -7,3 +7,14 @@
 
 # OS Files
 .DS_Store
+
+# Python analysis outputs
+*.csv
+*.png
+*.json
+thread_output*.txt
+out.txt
+log.txt
+table.html
+Untitled-2.tex
+llama.png

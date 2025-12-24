@@ -1,6 +1,5 @@
-
-
 ########## IMPORTS ##########
+
 import json
 import re
 import subprocess
@@ -15,9 +14,16 @@ from wordcloud import WordCloud
 import argparse
 import time
 import concurrent.futures
-
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import matplotlib.ticker as mtick
 
 ########## DEFINES ##########
+
+# Color Palette
+PRIMARY_COLOR = '#FFA500'  # Orange
+SECONDARY_COLOR = '#800080'  # Purple
+
 stat_headers = {
     'name': 'Person',
     'count': 'Total Messages',
@@ -100,6 +106,83 @@ def export_to_csv(data, filename, headers = None):
 def create_wordcloud(thecolor, thefile, thetext, themask):
     WordCloud(background_color="white", max_words=2000, mask=themask, contour_width=0, colormap=thecolor, min_word_length=3).generate(thetext).to_file(thefile)
 
+def generate_graph(data, filename, headers=None, group_by_month=False):
+    """Generates a graph showing reaction counts with grouped bars and a total line."""
+    df = pandas.DataFrame(data) if isinstance(data, list) else data
+    if headers:
+        df = df.rename(columns=headers)
+
+    # Convert numeric columns to float
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    df[numeric_cols] = df[numeric_cols].astype(float)
+
+    # Create figure with enough height for graph and table
+    fig = plt.figure(figsize=(12, 8))
+    gs = fig.add_gridspec(2, 1, height_ratios=[3, 1])
+    ax1 = fig.add_subplot(gs[0])
+    
+    if len(df) > 1:
+        categories = df.columns[1:]
+        numeric_categories = [col for col in categories if col in numeric_cols]
+        x = np.arange(len(numeric_categories))
+        width = 0.35
+        
+        # Create bars
+        bars1 = ax1.bar(x - width/2, df.iloc[0][numeric_categories].values, width,
+                       label=df.iloc[0,0], color=PRIMARY_COLOR, alpha=0.8)
+        bars2 = ax1.bar(x + width/2, df.iloc[1][numeric_categories].values, width,
+                       label=df.iloc[1,0], color=SECONDARY_COLOR, alpha=0.8)
+        
+        # Add total line
+        totals = df.iloc[:-1][numeric_categories].sum()
+        ax1.plot(x, totals, color='gray', alpha=0.3, linewidth=2,
+                label='Total', marker='o')
+        ax1.fill_between(x, totals, alpha=0.1, color='gray')
+        
+        # Customize axes
+        ax1.set_xticks(x)
+        ax1.set_xticklabels(numeric_categories, rotation=45, ha='right')
+        ax1.set_ylabel('Count')
+        
+        # Add value labels on bars
+        def autolabel(bars):
+            for bar in bars:
+                height = bar.get_height()
+                ax1.annotate(f'{int(height)}',
+                            xy=(bar.get_x() + bar.get_width() / 2, height),
+                            xytext=(0, 3),
+                            textcoords="offset points",
+                            ha='center', va='bottom')
+        
+        autolabel(bars1)
+        autolabel(bars2)
+        ax1.legend()
+        
+        # Add table with flipped orientation
+        ax_table = fig.add_subplot(gs[1])
+        ax_table.axis('off')
+        
+        # Prepare table data with categories as columns
+        table_data = []
+        for cat in numeric_categories:
+            row = [cat, f"{df.iloc[0][cat]}", f"{df.iloc[1][cat]}", f"{totals[cat]}"]
+            table_data.append(row)
+        
+        table = ax_table.table(cellText=table_data,
+                             colLabels=['Category', df.iloc[0,0], df.iloc[1,0], 'Total'],
+                             cellLoc='center',
+                             loc='center',
+                             bbox=[0, 0, 1, 1])
+        
+        table.auto_set_font_size(False)
+        table.set_fontsize(9)
+        table.scale(1.2, 1.5)
+        
+        plt.tight_layout()
+    
+    plt.savefig(filename, bbox_inches='tight', dpi=300)
+    plt.close()
+
 def main():
     parser = argparse.ArgumentParser(description='Process iMessage data.')
     parser.add_argument('-u', '--update-data', action='store_true', help='Re-run the iMessage data export')
@@ -135,8 +218,8 @@ def main():
     # Add the seconds to the Unix epoch
     first_msg_time = unix_epoch + datetime.timedelta(seconds=filtered_messages[0]['date'] / 10**9)
     last_msg_time = unix_epoch + datetime.timedelta(seconds=filtered_messages[-1]['date'] / 10**9)
-    end_date = datetime.datetime(1994 + 109, 5, 27, 8, 21, 0, tzinfo=ZoneInfo("America/Los_Angeles"))
-    our_days_remaining = (end_date - datetime.datetime.now().replace(tzinfo=ZoneInfo("America/Los_Angeles"))).days
+    end_time_date = datetime.datetime(1994 + 109, 5, 27, 8, 21, 0, tzinfo=ZoneInfo("America/Los_Angeles"))
+    our_days_remaining = (end_time_date - datetime.datetime.now().replace(tzinfo=ZoneInfo("America/Los_Angeles"))).days
 
     IRELYN_IDX=0
     WARREN_IDX=1
@@ -205,6 +288,13 @@ def main():
                     stats[idx]['emoji'] += 1
                     emoji_counters[idx][emj] = emoji_counters[idx].get(emj, 0) + 1
 
+                # Add the seconds to the Unix epoch
+                msg_time = unix_epoch + datetime.timedelta(seconds=msg['date'] / 10**9)
+                time_of_day_counters[idx][msg_time.hour] = time_of_day_counters[idx][msg_time.hour] + len(re.findall(r"\w+", msg['text']))
+                day_of_week_counters[idx][msg_time.weekday()] = day_of_week_counters[idx][msg_time.weekday()] + len(re.findall(r"\w+", msg['text']))
+                str_date = str((msg_time - datetime.timedelta(days=msg_time.weekday())).date())
+                date_counters[idx][str_date] = date_counters[idx].get(str_date, 0) + len(re.findall(r"\w+", msg['text']))
+
         for attc in msg['attachments']:
             if attc['mime_type']:
                 if attc['mime_type'].startswith('image'):
@@ -220,13 +310,6 @@ def main():
                     attachment_counters[idx]['loc'] = attachment_counters[idx].get('loc', 0) + 1
                 else:
                     attachment_counters[idx][attc['mime_type']] = attachment_counters[idx].get(attc['mime_type'], 0) + 1
-
-        # Add the seconds to the Unix epoch
-        msg_time = unix_epoch + datetime.timedelta(seconds=msg['date'] / 10**9)
-        time_of_day_counters[idx][msg_time.hour] = time_of_day_counters[idx][msg_time.hour] + 1
-        day_of_week_counters[idx][msg_time.weekday()] = day_of_week_counters[idx][msg_time.weekday()] + 1
-        str_date = str((msg_time - datetime.timedelta(days=msg_time.weekday())).date())
-        date_counters[idx][str_date] = date_counters[idx].get(str_date, 0) + 1
 
         # Reply Stats
         if reply_tracker['curr_idx'] != idx:
@@ -316,6 +399,25 @@ def main():
     export_to_csv(emoji_df, "emoji_counters.csv")
     export_to_csv(reaction_counters, 'reaction_counters.csv', reaction_headers)
     export_to_csv(attachment_counters, 'attachment_counters.csv', attachment_headers)
+    print(f"Done! Took {time.time() - segment_start:.2f} seconds.\n")
+
+    # Generate graphs
+    print(f'Generating graphs...')
+    segment_start = time.time()
+    print(f'\tGenerating stats graph...')
+    generate_graph(stats, 'stats.png', stat_headers)
+    print(f'\tGenerating time of day graph...')
+    generate_graph(time_of_day_counters, 'time_of_day_counters.png')
+    print(f'\tGenerating day of week graph...')
+    generate_graph(day_of_week_counters, 'day_of_week_counters.png', day_headers)
+    print(f'\tGenerating date graph...')
+    generate_graph(date_df, 'date_counters.png', group_by_month=True)
+    print(f'\tGenerating emoji graph...')
+    generate_graph(emoji_df, 'emoji_counters.png')
+    print(f'\tGenerating reaction graph...')
+    generate_graph(reaction_counters, 'reaction_counters.png', reaction_headers)
+    print(f'\tGenerating attachment graph...')
+    generate_graph(attachment_counters, 'attachment_counters.png', attachment_headers)
     print(f"Done! Took {time.time() - segment_start:.2f} seconds.\n")
 
     print("Creating wordclouds...")
